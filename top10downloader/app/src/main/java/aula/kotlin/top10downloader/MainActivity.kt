@@ -1,36 +1,148 @@
 package aula.kotlin.top10downloader
 
+import android.content.Context
 import android.os.AsyncTask
 import android.os.Bundle
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
+import android.widget.ArrayAdapter
+import android.widget.ListView
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.android.synthetic.main.activity_main.*
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.MalformedURLException
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
+import kotlin.properties.Delegates
 
+class FeedEntry {
+    var name : String = ""
+    var artist : String = ""
+    var releaseDate : String = ""
+    var summary : String = ""
+    var imageURL : String = ""
+
+    override fun toString(): String {
+        return """
+            name = $name
+            artist = $artist
+            releaseDate = $releaseDate
+            imageURL = $imageURL
+        """.trimIndent()
+    }
+}
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
+    private var downloadData : DownloadData? = null
+    private var feedUrl : String = "http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topfreeapplications/limit=%d/xml"
+    private var feedLimit = 10
+
+    private var feedCachedUrl = "INVALIDATED"
+    private val STATE_URL = "feedUrl"
+    private val STATE_LIMIT = "feedLimit"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        Log.d(TAG,"OnCreate called")
-        val downloadData = DownloadData()
-        //downloadData.execute("http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topfreeapplications/limit=10/xml")
-        downloadData.execute("http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topfreeapplications/limit=10/xml")
+        Log.d(TAG, "onCreate called")
+        if (savedInstanceState != null) {
+            feedUrl = savedInstanceState.getString(STATE_URL)!!
+            feedLimit = savedInstanceState.getInt(STATE_LIMIT)
+        }
+
+        downloadUrl(feedUrl.format(feedLimit))
         Log.d(TAG, "onCreate done")
+    }
+
+    private fun downloadUrl (feedUrl : String) {
+        if (feedUrl != feedCachedUrl) {
+            Log.d(TAG,"downloadUrl starting async task")
+            downloadData = DownloadData(this, xmlListView)
+            downloadData?.execute(feedUrl)
+            feedCachedUrl = feedUrl
+            Log.d(TAG, "downloadUrl done")
+        } else {
+            Log.d(TAG,"downloadUrl: url not  changed")
+        }
 
     }
 
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.feeds_menu, menu)
+
+        if (feedLimit == 10) {
+            menu?.findItem(R.id.mnu10)?.isChecked = true
+        } else {
+            menu?.findItem(R.id.mnu25)?.isChecked = true
+        }
+
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+
+
+        when (item.itemId) {
+            R.id.MnuFree ->
+                feedUrl = "http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topfreeapplications/limit=%d/xml"
+            R.id.MnuPaid ->
+                feedUrl = "http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/toppaidapplications/limit=%d/xml"
+            R.id.MnuSong ->
+                feedUrl = "http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topsongs/limit=%d/xml"
+            R.id.mnu10, R.id.mnu25 -> {
+                if (!item.isChecked) {
+                    item.isChecked = true
+                    feedLimit = 35 - feedLimit
+                    Log.d(TAG, "onOptionItemSelected: ${item.title} setting feedlimit to $feedLimit")
+                } else {
+                    Log.d(TAG, "onOptionItemSelected: ${item.title} setting feedlimit unchanged")
+                }
+            }
+            R.id.mnuRefresh ->
+                feedCachedUrl = "INVALIDATED"
+            else ->
+                return super.onOptionsItemSelected(item)
+        }
+
+        downloadUrl(feedUrl.format(feedLimit))
+        return true
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_URL, feedUrl)
+        outState.putInt(STATE_LIMIT, feedLimit)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        downloadData?.cancel(true)
+    }
+
     companion object {
-        private class DownloadData : AsyncTask<String, Void, String>() {
+        private class DownloadData (context : Context, listview : ListView) : AsyncTask<String, Void, String>() {
             private val TAG = "DonwloadData"
-            override fun onPostExecute(result: String?) {
+
+            var propContext : Context by Delegates.notNull()
+            var propListView : ListView by Delegates.notNull()
+
+            init {
+                propContext = context
+                propListView = listview
+            }
+
+            override fun onPostExecute(result: String) {
                 super.onPostExecute(result)
-                Log.d(TAG, "onPostExecute: parameter is $result")
+                val parseApplications = ParseApplications()
+                parseApplications.parse(result)
+
+                val feedAdapter = FeedAdapter(propContext,R.layout.list_record, parseApplications.applications)
+                propListView.adapter = feedAdapter
             }
 
             override fun doInBackground(vararg url: String?): String {
@@ -48,38 +160,15 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val url = URL(urlPath)
                     val connection: HttpURLConnection = url.openConnection() as HttpURLConnection
-                    val response = connection.responseCode
-                    Log.d(TAG, "downloadXML: the response code was $response")
 
-                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
-
-                    val inputBuffer = CharArray(500)
-                    var charsRead = 0
-                    while (charsRead >= 0) {
-                        charsRead = reader.read(inputBuffer)
-                        if (charsRead > 0) {
-                            xmlResult.append(String(inputBuffer, 0, charsRead))
-                        }
+                    connection.inputStream.buffered().reader().use {
+                        xmlResult.append(it.readText())
                     }
-                    reader.close()
-
-//                    connection.inputStream.buffered().reader().use {
-//                        xmlResult.append(it.readText())
-//                    }
 
 
                     Log.d(TAG, "Received ${xmlResult.length} bytes")
                     return xmlResult.toString()
 
-//                } catch (e: MalformedURLException) {
-//                    Log.e(TAG, "downloadXML: invalid URL ${e.message}")
-//                } catch (e: IOException) {
-//                    Log.e(TAG, "downloadXML: IO exception reading data: ${e.message}")
-//                } catch (e: SecurityException) {
-//                    Log.e(TAG, "downloadXML: Secirity exception. Needs permissions? ${e.message}")
-//                } catch (e : Exception) {
-//                    Log.e(TAG, "downloadXML: unknown error : ${e.message}")
-//                }
                 } catch (e: Exception) {
                     val errorMessage = when (e) {
                         is MalformedURLException -> "downloadXML: invalid URL ${e.message}"
