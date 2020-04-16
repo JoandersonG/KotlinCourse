@@ -25,7 +25,7 @@ class FlickrRecyclerViewAdapter(private var photoList : List<Photo>) : RecyclerV
 
     override fun getItemCount(): Int {
         //Log.d(TAG, ".getItemCount called")
-        return if (photoList.isNotEmpty()) photoList.size else 0
+        return if (photoList.isNotEmpty()) photoList.size else 1
     }
 
     fun loadNewData (newPhotos: List<Photo>) {
@@ -38,6 +38,13 @@ class FlickrRecyclerViewAdapter(private var photoList : List<Photo>) : RecyclerV
     }
 
     override fun onBindViewHolder(holder: FlickrImageViewHolder, position: Int) {
+
+        if (photoList.isEmpty()) {
+            holder.thumbnail.setImageResource(R.drawable.placeholder)
+            holder.title.setText(R.string.empty_photo)
+            return
+        }
+
         val photoItem = photoList[position]
 //        Log.d(TAG, ".onBindViewHolder: called")
 
