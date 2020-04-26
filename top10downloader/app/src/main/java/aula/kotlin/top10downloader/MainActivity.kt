@@ -1,23 +1,13 @@
 package aula.kotlin.top10downloader
 
-import android.content.Context
-import android.os.AsyncTask
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
-import android.widget.ArrayAdapter
-import android.widget.ListView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Observer
+import androidx.lifecycle.ViewModelProvider
 import kotlinx.android.synthetic.main.activity_main.*
-import java.io.BufferedReader
-import java.io.IOException
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.MalformedURLException
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
-import kotlin.properties.Delegates
 
 class FeedEntry {
     var name : String = ""
@@ -26,51 +16,43 @@ class FeedEntry {
     var summary : String = ""
     var imageURL : String = ""
 
-    override fun toString(): String {
-        return """
-            name = $name
-            artist = $artist
-            releaseDate = $releaseDate
-            imageURL = $imageURL
-        """.trimIndent()
-    }
 }
+
+private const val TAG = "MainActivity"
+private const val STATE_URL = "feedUrl"
+private const val STATE_LIMIT = "feedLimit"
+
 class MainActivity : AppCompatActivity() {
-    private val TAG = "MainActivity"
-    private var downloadData : DownloadData? = null
+
     private var feedUrl : String = "http://ax.itunes.apple.com/WebObjects/MZStoreServices.woa/ws/RSS/topfreeapplications/limit=%d/xml"
     private var feedLimit = 10
 
-    private var feedCachedUrl = "INVALIDATED"
-    private val STATE_URL = "feedUrl"
-    private val STATE_LIMIT = "feedLimit"
+
+//    val feedViewModel = FeedViewModel by viewModels()
+//    val feedViewModel = ViewModelProviders.of(this).get(FeedViewModel::class.java)
+    private val feedViewModel by lazy { ViewModelProvider(this).get(FeedViewModel::class.java)}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         Log.d(TAG, "onCreate called")
+
+        val feedAdapter = FeedAdapter(this, R.layout.list_record, EMPTY_FEED_LIST)
+        xmlListView.adapter = feedAdapter
+
         if (savedInstanceState != null) {
             feedUrl = savedInstanceState.getString(STATE_URL)!!
             feedLimit = savedInstanceState.getInt(STATE_LIMIT)
         }
 
-        downloadUrl(feedUrl.format(feedLimit))
+        feedViewModel.feedEntries.observe(this,
+            Observer<List<FeedEntry>> { feedEntries -> feedAdapter.setFeedList(feedEntries ?: EMPTY_FEED_LIST) })
+
+        feedViewModel.downloadUrl(feedUrl.format(feedLimit))
         Log.d(TAG, "onCreate done")
     }
 
-    private fun downloadUrl (feedUrl : String) {
-        if (feedUrl != feedCachedUrl) {
-            Log.d(TAG,"downloadUrl starting async task")
-            downloadData = DownloadData(this, xmlListView)
-            downloadData?.execute(feedUrl)
-            feedCachedUrl = feedUrl
-            Log.d(TAG, "downloadUrl done")
-        } else {
-            Log.d(TAG,"downloadUrl: url not  changed")
-        }
-
-    }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         menuInflater.inflate(R.menu.feeds_menu, menu)
@@ -104,12 +86,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             R.id.mnuRefresh ->
-                feedCachedUrl = "INVALIDATED"
+                feedViewModel.invalidate()
             else ->
                 return super.onOptionsItemSelected(item)
         }
 
-        downloadUrl(feedUrl.format(feedLimit))
+        feedViewModel.downloadUrl(feedUrl.format(feedLimit))
         return true
     }
 
@@ -118,70 +100,4 @@ class MainActivity : AppCompatActivity() {
         outState.putString(STATE_URL, feedUrl)
         outState.putInt(STATE_LIMIT, feedLimit)
     }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        downloadData?.cancel(true)
-    }
-
-    companion object {
-        private class DownloadData (context : Context, listview : ListView) : AsyncTask<String, Void, String>() {
-            private val TAG = "DonwloadData"
-
-            var propContext : Context by Delegates.notNull()
-            var propListView : ListView by Delegates.notNull()
-
-            init {
-                propContext = context
-                propListView = listview
-            }
-
-            override fun onPostExecute(result: String) {
-                super.onPostExecute(result)
-                val parseApplications = ParseApplications()
-                parseApplications.parse(result)
-
-                val feedAdapter = FeedAdapter(propContext,R.layout.list_record, parseApplications.applications)
-                propListView.adapter = feedAdapter
-            }
-
-            override fun doInBackground(vararg url: String?): String {
-                Log.d(TAG, "doInBackground: starts with ${url[0]}")
-                val rssFeed = downloadXML(url[0])
-                if (rssFeed.isEmpty()) {
-                    Log.e(TAG, "doInBackground: error downloading")
-                }
-                return rssFeed
-            }
-
-            private fun downloadXML (urlPath : String?) : String {
-                val xmlResult = StringBuilder()
-
-                try {
-                    val url = URL(urlPath)
-                    val connection: HttpURLConnection = url.openConnection() as HttpURLConnection
-
-                    connection.inputStream.buffered().reader().use {
-                        xmlResult.append(it.readText())
-                    }
-
-
-                    Log.d(TAG, "Received ${xmlResult.length} bytes")
-                    return xmlResult.toString()
-
-                } catch (e: Exception) {
-                    val errorMessage = when (e) {
-                        is MalformedURLException -> "downloadXML: invalid URL ${e.message}"
-                        is IOException -> "downloadXML: IO exception reading data: ${e.message}"
-                        is SecurityException -> "downloadXML: Secirity exception. Needs permissions? ${e.message}"
-                        else -> "downloadXML: unknown error : ${e.message}"
-                    }
-                    Log.e(TAG,errorMessage)
-                }
-                return ""
-            }
-        }
-    }
-
-
 }

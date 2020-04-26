@@ -10,7 +10,7 @@ class ParseApplications {
     val applications = ArrayList<FeedEntry>()
 
     fun parse (xmlData : String) : Boolean {
-        Log.d(TAG, "parse called with $xmlData")
+        Log.d(TAG, "parse called")
         var status = true
         var isEntry = false
         var textValue = ""
